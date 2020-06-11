@@ -1,7 +1,7 @@
-import discord, datetime, asyncio, gspread
+import discord, datetime, asyncio, gspread # TODO a death system
 from discord.ext import tasks, commands # TODO an automatic voting system
 from oauth2client.service_account import ServiceAccountCredentials # TODO add an option for random assignment of roles from a role list. eg. you put Random as the role name when adding the player and then when the game starts it uses the supplied (optional) role list to randomly assign roles to players, taking into account which roles were manually assigned
-from enum import Enum
+from enum import Enum # TODO add system for custom roles
 
 scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scope)
@@ -11,7 +11,7 @@ sheet = sheets_client.open('ToS Bot Data').sheet1
 bot = commands.Bot(command_prefix='ts!')
 games = {}
 
-@tasks.loop(seconds=.1)
+@tasks.loop(seconds=60)
 async def update():
     time = datetime.datetime.utcnow()
 
@@ -19,7 +19,6 @@ async def update():
         game = games[guild_id]
         if (game.in_progress and (time.hour == game.transition_times[0][0] and time.minute == game.transition_times[0][1]) or (time.hour == game.transition_times[1][0] and time.minute == game.transition_times[1][1])):
             await game.progress_time()
-            await asyncio.sleep(60)
 
 class SalemRole(Enum):
     INVESTIGATOR = 1
@@ -58,6 +57,46 @@ class SalemRole(Enum):
     PIRATE = 34
     SERIAL_KILLER = 35
     WEREWOLF = 36
+    CUSTOM = 37
+
+invest_results = { # TODO there are special rules like if they are framed or whatnot
+    SalemRole.INVESTIGATOR: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
+    SalemRole.LOOKOUT: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
+    SalemRole.PSYCHIC: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
+    SalemRole.SHERIFF: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
+    SalemRole.SPY: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
+    SalemRole.TRACKER: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER],
+    SalemRole.BODYGUARD: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
+    SalemRole.CRUSADER: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
+    SalemRole.DOCTOR: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
+    SalemRole.ESCORT: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
+    SalemRole.MAYOR: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
+    SalemRole.MEDIUM: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER],
+    SalemRole.TRANSPORTER: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
+    SalemRole.JAILOR: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
+    SalemRole.VETERAN: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
+    SalemRole.VIGILANTE: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
+    SalemRole.EXECUTIONER: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
+    SalemRole.JESTER: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
+    SalemRole.WITCH: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
+    SalemRole.AMNESIAC: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
+    SalemRole.GUARDIAN_ANGEL: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
+    SalemRole.SURVIVOR: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
+    SalemRole.ARSONIST: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
+    SalemRole.JUGGERNAUT: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
+    SalemRole.PIRATE: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
+    SalemRole.SERIAL_KILLER: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
+    SalemRole.WEREWOLF: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
+    SalemRole.AMBUSHER: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
+    SalemRole.GODFATHER: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
+    SalemRole.MAFIOSO: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
+    SalemRole.BLACKMAILER: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
+    SalemRole.CONSIGLIERE: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
+    SalemRole.CONSORT: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
+    SalemRole.FRAMER: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
+    SalemRole.HYPNOTIST: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
+    SalemRole.JANITOR: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER], # TODO add custom role support (maybe it just randomly picks a list???)
+}
 
 class Player:
     """The class for players"""
@@ -66,6 +105,12 @@ class Player:
         self.personal_channel_id = personal_channel_id
         self.role = role
         self.alive = True
+
+    #INVESTIGATOR
+    def investigate(self, target):
+        if self.role == SalemRole.INVESTIGATOR:
+            target_role = target.role
+
 
 class Game:
     """The main game class"""
@@ -86,6 +131,10 @@ class Game:
             await self.bot.get_channel(self.game_channel_id).set_permissions(self.bot.get_guild(self.guild_id).get_role(self.player_role_id), send_messages=True)
         else:
             await self.bot.get_channel(self.game_channel_id).send(f'**NIGHT {int(self.day)}**')
+            if (self.day - 0.5) % 2 == 0:
+                await self.bot.get_channel(self.game_channel_id).send(f'**There is a full moon out tonight.**')
+                for werewolf in self.players_from_role(SalemRole.WEREWOLF):
+                    await self.bot.get_channel(werewolf.personal_channel_id).send(f'{self.bot.get_user(werewolf.user_id).mention} **There is a full moon out tonight.**')
             await self.bot.get_channel(self.game_channel_id).send(f'{self.bot.get_guild(self.guild_id).get_role(self.player_role_id).mention} Remember to use your roles tonight.')
             await self.bot.get_channel(self.game_channel_id).set_permissions(self.bot.get_guild(self.guild_id).get_role(self.player_role_id), send_messages=False)
         save(self.guild_id)
@@ -126,16 +175,19 @@ async def setup_game(ctx, player_role: discord.Role, hour1: int, minute1: int, h
        await ctx.send('A game instance already exists. Delete this instance with the command "delete_game" to be able to create a new one.') 
     await ctx.message.delete()
 
-@bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1u-WXqlYEe6hYk8PB3lO6oqk0sPhzXeAc/view?usp=sharing')
+@bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
 @commands.has_permissions(administrator=True)
 async def add_player(ctx, player: discord.User, role):
     game = games[ctx.guild.id]
-    print(f'{player.display_name} is a {role}')
-    game.players.append(Player(player.id, ctx.channel.id, SalemRole[role.upper()]))
-    save(ctx.guild.id)
-    await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
-    await ctx.send(f'{player.mention} Welcome! This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. You must have it pinned, or it will not go through, in the case that you die. You have been given pin perms for this channel.')
-    await ctx.message.delete()
+    try:
+        print(f'{player.display_name} is a {role}')
+        game.players.append(Player(player.id, ctx.channel.id, SalemRole[role.upper()]))
+        save(ctx.guild.id)
+        await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
+        await ctx.send(f'{player.mention} Welcome! This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. You must have it pinned, or it will not go through, in the case that you die. You have been given pin perms for this channel.')
+        await ctx.message.delete()
+    except:
+        await ctx.send(f'Role does not exist. To use a custom role, put CUSTOM for the role parameter. See list of roles here: https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
 
 @bot.command(brief='Starts the game instance')
 @commands.has_permissions(administrator=True)
@@ -145,6 +197,8 @@ async def start_game(ctx):
 
     for player in games[ctx.guild.id].players:
         await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the {player.role.name}')
+        if player.role == SalemRole.CUSTOM:
+            await bot.get_channel(player.personal_channel_id).send('Your role is a custom role. The host will give the role to you.')
     await ctx.message.delete()
 
 @bot.command(aliases=['utc'], brief='Gives the current time in UTC')
@@ -156,8 +210,18 @@ async def time(ctx):
 async def set_transition_times(ctx, hour1, minute1, hour2, minute2):
     games[ctx.guild.id].transition_times = [[int(hour1), int(minute1)], [int(hour2), int(minute2)]]
     save(ctx.guild.id)
-    await ctx.send('Transition times changed.')
+    await ctx.message.add_reaction('✅')
 
+@bot.command(brief='Sets a players role to a new role')
+@commands.has_permissions(administrator=True)
+async def set_role(ctx, user: discord.User, role):
+    game = games[ctx.guild.id]
+    player = game.player_from_id(user.id)
+    player.role = SalemRole[role]
+    save(ctx.guild.id)
+    await bot.get_channel(player.personal_channel_id).send(f'{user.mention} Your role has been changed to {player.role.name}')
+
+    await ctx.message.add_reaction('✅')
 
 @bot.command(aliases=['w', 'message', 'msg', 'pm', 'dm'], brief='Whispers to a specified channel and tells everyone in the game')
 async def whisper(ctx, recipient: discord.User, *, message):
@@ -169,6 +233,7 @@ async def whisper(ctx, recipient: discord.User, *, message):
             await bot.get_channel(blackmailer.personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}* to **{recipient.display_name}**')
 
         print(f'{ctx.author.display_name} whispers {message} to {recipient.display_name}')
+        await ctx.message.add_reaction('✅')
 
 @bot.command(aliases=['ginfo', 'game_data', 'gdata', 'data'], brief='Lists info about the game')
 @commands.has_permissions(administrator=True)
@@ -230,6 +295,7 @@ def load(guild_id):
 async def progress_time(ctx):
     if ctx.guild.id in games:
         await games[ctx.guild.id].progress_time()
+        await ctx.message.add_reaction('✅')
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
@@ -243,8 +309,13 @@ async def delete_game(ctx):
         row = guild_ids.index(str(ctx.guild.id)) + 1
         sheet.delete_rows(row)
 
-        await ctx.send('Game instance deleted.')
+        await ctx.message.add_reaction('✅')
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
+
+@bot.command(aliases=['invest'])
+async def investigate(ctx, target: discord.User):
+    game = games[ctx.guild.id]
+    player = game.player_from_id(ctx.user.id)
 
 bot.run('NzE5NTUzNDM3OTMwNjE4OTQy.Xt5IMg.wUU2ERW_9UMdqbsmWKVsO6yEHis')
