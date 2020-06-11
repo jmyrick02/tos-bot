@@ -50,11 +50,14 @@ class SalemRole(Enum):
     EXECUTIONER = 26
     JESTER = 27
     WITCH = 28
-    ARSONIST = 29
-    JUGGERNAUT = 30
-    PIRATE = 31
-    SERIAL_KILLER = 32
-    WEREWOLF = 33
+    AMNESIAC = 29
+    GUARDIAN_ANGEL = 30
+    SURVIVOR = 31
+    ARSONIST = 32
+    JUGGERNAUT = 33
+    PIRATE = 34
+    SERIAL_KILLER = 35
+    WEREWOLF = 36
 
 class Player:
     """The class for players"""
@@ -123,7 +126,7 @@ async def setup_game(ctx, player_role: discord.Role, hour1: int, minute1: int, h
        await ctx.send('A game instance already exists. Delete this instance with the command "delete_game" to be able to create a new one.') 
     await ctx.message.delete()
 
-@bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
+@bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1u-WXqlYEe6hYk8PB3lO6oqk0sPhzXeAc/view?usp=sharing')
 @commands.has_permissions(administrator=True)
 async def add_player(ctx, player: discord.User, role):
     game = games[ctx.guild.id]
