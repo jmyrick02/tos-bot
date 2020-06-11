@@ -313,9 +313,4 @@ async def delete_game(ctx):
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
-@bot.command(aliases=['invest'])
-async def investigate(ctx, target: discord.User):
-    game = games[ctx.guild.id]
-    player = game.player_from_id(ctx.user.id)
-
 bot.run('NzE5NTUzNDM3OTMwNjE4OTQy.Xt5IMg.wUU2ERW_9UMdqbsmWKVsO6yEHis')
