@@ -59,45 +59,6 @@ class SalemRole(Enum):
     WEREWOLF = 36
     CUSTOM = 37
 
-invest_results = { # TODO there are special rules like if they are framed or whatnot
-    SalemRole.INVESTIGATOR: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
-    SalemRole.LOOKOUT: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
-    SalemRole.PSYCHIC: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
-    SalemRole.SHERIFF: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
-    SalemRole.SPY: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
-    SalemRole.TRACKER: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER],
-    SalemRole.BODYGUARD: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
-    SalemRole.CRUSADER: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
-    SalemRole.DOCTOR: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
-    SalemRole.ESCORT: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
-    SalemRole.MAYOR: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
-    SalemRole.MEDIUM: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER],
-    SalemRole.TRANSPORTER: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
-    SalemRole.JAILOR: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
-    SalemRole.VETERAN: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
-    SalemRole.VIGILANTE: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
-    SalemRole.EXECUTIONER: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
-    SalemRole.JESTER: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
-    SalemRole.WITCH: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
-    SalemRole.AMNESIAC: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
-    SalemRole.GUARDIAN_ANGEL: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
-    SalemRole.SURVIVOR: [SalemRole.SURVIVOR, SalemRole.PSYCHIC, SalemRole.AMNESIAC],
-    SalemRole.ARSONIST: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
-    SalemRole.JUGGERNAUT: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
-    SalemRole.PIRATE: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
-    SalemRole.SERIAL_KILLER: [SalemRole.DOCTOR, SalemRole.GUARDIAN_ANGEL, SalemRole.SERIAL_KILLER],
-    SalemRole.WEREWOLF: [SalemRole.SHERIFF, SalemRole.EXECUTIONER, SalemRole.WEREWOLF],
-    SalemRole.AMBUSHER: [SalemRole.CRUSADER, SalemRole.AMBUSHER, SalemRole.PIRATE],
-    SalemRole.GODFATHER: [SalemRole.BODYGUARD, SalemRole.GODFATHER, SalemRole.ARSONIST],
-    SalemRole.MAFIOSO: [SalemRole.VIGILANTE, SalemRole.VETERAN, SalemRole.MAFIOSO],
-    SalemRole.BLACKMAILER: [SalemRole.SPY, SalemRole.BLACKMAILER, SalemRole.JAILOR],
-    SalemRole.CONSIGLIERE: [SalemRole.INVESTIGATOR, SalemRole.CONSIGLIERE, SalemRole.MAYOR],
-    SalemRole.CONSORT: [SalemRole.ESCORT, SalemRole.TRANSPORTER, SalemRole.CONSORT],
-    SalemRole.FRAMER: [SalemRole.FRAMER, SalemRole.JUGGERNAUT, SalemRole.JESTER],
-    SalemRole.HYPNOTIST: [SalemRole.LOOKOUT, SalemRole.HYPNOTIST, SalemRole.WITCH],
-    SalemRole.JANITOR: [SalemRole.MEDIUM, SalemRole.JANITOR, SalemRole.TRACKER], # TODO add custom role support (maybe it just randomly picks a list???)
-}
-
 class Player:
     """The class for players"""
     def __init__(self, user_id, personal_channel_id, role):
@@ -110,7 +71,6 @@ class Player:
     def investigate(self, target):
         if self.role == SalemRole.INVESTIGATOR:
             target_role = target.role
-
 
 class Game:
     """The main game class"""
@@ -177,10 +137,11 @@ async def setup_game(ctx, player_role: discord.Role, hour1: int, minute1: int, h
 
 @bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
 @commands.has_permissions(administrator=True)
-async def add_player(ctx, player: discord.User, role):
+async def add_player(ctx, nick, role):
     game = games[ctx.guild.id]
     try:
-        print(f'{player.display_name} is a {role}')
+        player = discord.utils.get(ctx.guild.members, display_name=nick)
+
         game.players.append(Player(player.id, ctx.channel.id, SalemRole[role.upper()]))
         save(ctx.guild.id)
         await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
@@ -196,7 +157,7 @@ async def start_game(ctx):
     await games[ctx.guild.id].progress_time()
 
     for player in games[ctx.guild.id].players:
-        await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the {player.role.name}')
+        await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the **{player.role.name}**. The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}')
         if player.role == SalemRole.CUSTOM:
             await bot.get_channel(player.personal_channel_id).send('Your role is a custom role. The host will give the role to you.')
     await ctx.message.delete()
@@ -214,8 +175,9 @@ async def set_transition_times(ctx, hour1, minute1, hour2, minute2):
 
 @bot.command(brief='Sets a players role to a new role')
 @commands.has_permissions(administrator=True)
-async def set_role(ctx, user: discord.User, role):
+async def set_role(ctx, nick, role):
     game = games[ctx.guild.id]
+    user = discord.utils.get(ctx.guild.members, display_name=nick)
     player = game.player_from_id(user.id)
     player.role = SalemRole[role]
     save(ctx.guild.id)
@@ -223,17 +185,24 @@ async def set_role(ctx, user: discord.User, role):
 
     await ctx.message.add_reaction('✅')
 
-@bot.command(aliases=['w', 'message', 'msg', 'pm', 'dm'], brief='Whispers to a specified channel and tells everyone in the game')
-async def whisper(ctx, recipient: discord.User, *, message):
-    if ctx.guild.id in games and games[ctx.guild.id].day == int(games[ctx.guild.id].day):
+@bot.command(aliases=['w', 'message', 'msg', 'pm', 'dm'], brief='Whispers to a player in the game and tells everyone in the game')
+async def whisper(ctx, nick, *, message):
+    recipient = discord.utils.get(ctx.guild.members, display_name=nick)
+    if ctx.guild.id in games and games[ctx.guild.id].day == int(games[ctx.guild.id].day) and recipient != ctx.author:
         await bot.get_channel(games[ctx.guild.id].player_from_id(recipient.id).personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}*')
         await bot.get_channel(games[ctx.guild.id].game_channel_id).send(f'**{ctx.author.display_name}** is whispering to **{recipient.display_name}**')
 
         for blackmailer in games[ctx.guild.id].players_from_role(SalemRole.BLACKMAILER):
             await bot.get_channel(blackmailer.personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}* to **{recipient.display_name}**')
 
-        print(f'{ctx.author.display_name} whispers {message} to {recipient.display_name}')
         await ctx.message.add_reaction('✅')
+
+@bot.command(aliases=['player_list', 'players_list', 'plist'], brief='Lists all players in the game.')
+async def list_players(ctx):
+    game = games[ctx.guild.id]
+    await ctx.send(f'**Players:**')
+    for player in game.players:
+            await ctx.send(f'•{ctx.guild.get_member(player.user_id).display_name} ({bot.get_user(player.user_id)})')
 
 @bot.command(aliases=['ginfo', 'game_data', 'gdata', 'data'], brief='Lists info about the game')
 @commands.has_permissions(administrator=True)
@@ -242,7 +211,7 @@ async def game_info(ctx):
         game = games[ctx.guild.id]
         await ctx.send(f'**In Progress:** {game.in_progress}\n**Game Channel ID:** {game.game_channel_id}\n**Player Role ID:** {game.player_role_id}\n**Transition Times:** {game.transition_times}\n**Current Day:** {game.day}\n**Players:**')
         for player in game.players:
-            await ctx.send(f'•{bot.get_user(player.user_id).display_name} - {player.role.name}')
+            await ctx.send(f'•{ctx.guild.get_member(player.user_id).display_name} - {player.role.name}')
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
@@ -303,6 +272,11 @@ async def progress_time(ctx):
 @commands.has_permissions(administrator=True)
 async def delete_game(ctx):
     if ctx.guild.id in games:
+        for player in games[ctx.guild.id].players:
+            pinned_messages = await bot.get_channel(player.personal_channel_id).pins()
+            for pin in pinned_messages:
+                await pin.unpin()
+        
         del games[ctx.guild.id]
         
         guild_ids = sheet.col_values(1)
