@@ -1,4 +1,4 @@
-import discord, datetime, asyncio, gspread # TODO a death system
+import discord, datetime, asyncio, gspread
 from discord.ext import tasks, commands  # TODO an automatic voting system
 from oauth2client.service_account import ServiceAccountCredentials # TODO add an option for random assignment of roles from a role list. eg. you put Random as the role name when adding the player and then when the game starts it uses the supplied (optional) role list to randomly assign roles to players, taking into account which roles were manually assigned
 from enum import Enum  # TODO add system for custom roles
@@ -104,7 +104,7 @@ class Game:
     def players_from_role(self, role):
         players = []
         for player in self.players:
-            if player.alive and player.role == role:
+            if player.role == role:
                 players.append(player)
         return players
 
@@ -124,8 +124,7 @@ async def setup_game(ctx, player_role: discord.Role, hour1: int, minute1: int, h
         game_channel_id = ctx.channel.id
         player_role_id = player_role.id
         transition_times = [[hour1, minute1], [hour2, minute2]]
-        games[guild_id] = Game(
-            bot, guild_id, False, game_channel_id, player_role_id, transition_times, [])
+        games[guild_id] = Game(bot, guild_id, False, game_channel_id, player_role_id, transition_times, [])
         save(guild_id)
 
         await ctx.send('The game instance is set up. Use the command "delete_game" to delete this game instance and to be able to restart. Finish set up using the command "add_player" in each player\'s respective personal channel. Use the command "game_info" to review info about this instance. Use the command "start_game" to begin this instance.')
@@ -149,21 +148,51 @@ async def add_player(ctx, nick: str, role):
         game.players.append(Player(player.id, ctx.channel.id, SalemRole[role.upper()]))
         save(ctx.guild.id)
         await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
-        await ctx.send(f'{player.mention} Welcome! This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. You must have it pinned, or it will not go through, in the case that you die. You have been given pin perms for this channel.')
+        await ctx.send(f'{player.mention} Welcome! This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. **You must have the will pinned** (it must be the only pinned message), or it will not go through, in the case that you die. You have been given pin perms for this channel.')
         await ctx.message.delete()
     except:
         await ctx.send(f'Role or user does not exist. To use a custom role, put CUSTOM for the role parameter. See list of roles here: https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
+
+@bot.command(brief='Removes a player from the game instance.')
+@commands.has_permissions(administrator=True)
+async def remove_player(ctx, nick: str, automatic: bool, *, death_reason):
+    game = games[ctx.guild.id]
+
+    players = [user for user in ctx.guild.members if nick == user.display_name or nick == str(user.id) or nick == user.name or nick == str(user)]
+    player = None
+    if len(players) == 1:
+        player = players[0]
+    else:
+        player = None
+        await ctx.send('There are multiple matches for the entered nickname. Please redo this command with their full discord name.')
+    
+    await ctx.message.delete()
+    game_player = game.player_from_id(player.id)
+    game_player.alive = False
+
+    if automatic:
+        pins = await bot.get_channel(game_player.personal_channel_id).pins()
+        if len(pins) == 0:
+            await ctx.send(f'{bot.get_guild(ctx.guild.id).get_member(game_player.user_id).display_name} was found dead.\n{death_reason}\nWe found no last will.\nTheir role was {game_player.role.name}')
+        else:
+            await ctx.send(f'{bot.get_guild(ctx.guild.id).get_member(game_player.user_id).display_name} was found dead.\n{death_reason}\nWe found a last will:```{pins[-1].content}```Their role was {game_player.role.name}')
+
+    save(ctx.guild.id)
+      
 
 @bot.command(brief='Starts the game instance')
 @commands.has_permissions(administrator=True)
 async def start_game(ctx):
     games[ctx.guild.id].in_progress = True
+    await bot.get_channel(games[ctx.guild.id].game_channel_id).send('**-------------------------------------------------------------------------------------------------------------------------**')
     await games[ctx.guild.id].progress_time()
 
     for player in games[ctx.guild.id].players:
-        await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the **{player.role.name}**. The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}')
+        await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the **{player.role.name}**. The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}\nTo use your role tell the host what you will be doing.')
         if player.role == SalemRole.CUSTOM:
             await bot.get_channel(player.personal_channel_id).send('Your role is a custom role. The host will give the role to you.')
+        
+        await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(bot.get_guild(ctx.guild.id).get_member(player.user_id), read_messages=True, read_message_history=True)
     await ctx.message.delete()
 
 @bot.command(aliases=['utc'], brief='Gives the current time in UTC')
@@ -208,9 +237,9 @@ async def whisper(ctx, nick, *, message):
         recipient = players[0]
     else:
         recipient = None
-        await ctx.send('There are multiple matches for the entered nickname. Please redo this command with their full discord name or id.')
+        await ctx.send('There are no/multiple matches for the entered nickname. Please redo this command with their full discord name or id.')
 
-    if ctx.guild.id in games and games[ctx.guild.id].day == int(games[ctx.guild.id].day) and recipient != ctx.author:
+    if ctx.guild.id in games and games[ctx.guild.id].day == int(games[ctx.guild.id].day) and recipient != ctx.author and games[ctx.guild.id].day >= 2 and games[ctx.guild.id].player_from_id(ctx.author.id).alive and games[ctx.guild.id].player_from_id(recipient.id).alive:
         await bot.get_channel(games[ctx.guild.id].player_from_id(recipient.id).personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}*')
         await bot.get_channel(games[ctx.guild.id].game_channel_id).send(f'**{ctx.author.display_name}** is whispering to **{recipient.display_name}**')
 
@@ -218,13 +247,17 @@ async def whisper(ctx, nick, *, message):
             await bot.get_channel(blackmailer.personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}* to **{recipient.display_name}**')
 
         await ctx.message.add_reaction('✅')
+    else:
+        await ctx.send(f'This whisper is not valid. To whisper, you and your recipient must be alive in the game and it must be day time but not the first day.')
 
 @bot.command(aliases=['player_list', 'players_list', 'plist'], brief='Lists all players in the game.')
 async def list_players(ctx):
     game = games[ctx.guild.id]
-    await ctx.send(f'**Players:**')
+    message = '**Players:**\n'
     for player in game.players:
-        await ctx.send(f'•{ctx.guild.get_member(player.user_id).display_name} ({bot.get_user(player.user_id)})')
+        if player.alive:
+            message += f'•{ctx.guild.get_member(player.user_id).display_name} ({bot.get_user(player.user_id)})\n'
+    await ctx.send(message)
 
 @bot.command(aliases=['ginfo', 'game_data', 'gdata', 'data'], brief='Lists info about the game')
 @commands.has_permissions(administrator=True)
@@ -246,6 +279,7 @@ def save(guild_id):
         data.append(str(player.user_id))
         data.append(str(player.personal_channel_id))
         data.append(str(player.role.name))
+        data.append(str(player.alive))
 
     guild_ids = sheet.col_values(1)
     row = len(guild_ids) + 1
@@ -271,11 +305,13 @@ def load(guild_id):
         day = float(data[8])
 
         players = []
-        for i in range(9, len(data) - 1, 3):
+        for i in range(9, len(data) - 1, 4):
             user_id = int(data[i])
             personal_channel_id = int(data[i + 1])
             role_name = data[i + 2]
-            players.append(Player(user_id, personal_channel_id, SalemRole[role_name]))
+            player = Player(user_id, personal_channel_id, SalemRole[role_name])
+            player.alive = False if data[i + 3] == "False" else True
+            players.append(player)
 
         games[guild_id] = Game(bot, guild_id, in_progress, game_channel_id, player_role_id, transition_times, players)
         games[guild_id].day = day
@@ -297,9 +333,14 @@ async def progress_time(ctx):
 async def delete_game(ctx):
     if ctx.guild.id in games:
         for player in games[ctx.guild.id].players:
-            pinned_messages = await bot.get_channel(player.personal_channel_id).pins()
-            for pin in pinned_messages:
-                await pin.unpin()
+            try:
+                pinned_messages = await bot.get_channel(player.personal_channel_id).pins()
+                for pin in pinned_messages:
+                    await pin.unpin()
+
+                await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(bot.get_guild(ctx.guild.id).get_member(player.user_id), send_messages=False)
+            except:
+                continue
 
         del games[ctx.guild.id]
 
