@@ -1,9 +1,9 @@
-import discord, datetime, asyncio, gspread
+import discord, datetime, asyncio, gspread # TODO revamp game setup system
 from discord.ext import tasks, commands  # TODO an automatic voting system
-from oauth2client.service_account import ServiceAccountCredentials # TODO add an option for random assignment of roles from a role list. eg. you put Random as the role name when adding the player and then when the game starts it uses the supplied (optional) role list to randomly assign roles to players, taking into account which roles were manually assigned
-from enum import Enum  # TODO add system for custom roles
-
-scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+from oauth2client.service_account import ServiceAccountCredentials # TODO remove try statements and replace with better error handling
+from enum import Enum  # TODO redo system for custom roles
+# TODO make mayor reveal system and so they can't be whispered to after revealing
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive'] # TODO organize code
 creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scope)
 sheets_client = gspread.authorize(creds)
 sheet = sheets_client.open('ToS Bot Data').sheet1
@@ -147,9 +147,13 @@ async def add_player(ctx, nick: str, role):
 
         game.players.append(Player(player.id, ctx.channel.id, SalemRole[role.upper()]))
         save(ctx.guild.id)
-        await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
-        await ctx.send(f'{player.mention} Welcome! This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. **You must have the will pinned** (it must be the only pinned message), or it will not go through, in the case that you die. You have been given pin perms for this channel.')
+
+        await player.add_roles(ctx.guild.get_role(game.player_role_id))
         await ctx.message.delete()
+        await ctx.channel.set_permissions(player, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
+        await ctx.send(player.mention)
+        embed = discord.Embed(title='Welcome!', description='This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. **You must have the will pinned** (it must be the only pinned message), or it will not go through, in the case that you die. You have been given pin perms for this channel.', color=discord.Color.dark_green())
+        await ctx.send(embed=embed)
     except:
         await ctx.send(f'Role or user does not exist. To use a custom role, put CUSTOM for the role parameter. See list of roles here: https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
 
@@ -169,13 +173,19 @@ async def remove_player(ctx, nick: str, automatic: bool, *, death_reason):
     await ctx.message.delete()
     game_player = game.player_from_id(player.id)
     game_player.alive = False
+    await player.remove_roles(ctx.guild.get_role(game.player_role_id))
 
     if automatic:
+        embed = discord.Embed(title=f'{ctx.guild.get_member(game_player.user_id).display_name} was found dead', description=death_reason, color=discord.Color.dark_red())
+
         pins = await bot.get_channel(game_player.personal_channel_id).pins()
         if len(pins) == 0:
-            await ctx.send(f'{bot.get_guild(ctx.guild.id).get_member(game_player.user_id).display_name} was found dead.\n{death_reason}\nWe found no last will.\nTheir role was {game_player.role.name}')
+            embed.add_field(name='Will', value='We found no last will.', inline=False)
         else:
-            await ctx.send(f'{bot.get_guild(ctx.guild.id).get_member(game_player.user_id).display_name} was found dead.\n{death_reason}\nWe found a last will:```{pins[-1].content}```Their role was {game_player.role.name}')
+            embed.add_field(name='Will', value=f'```{pins[-1].content}```', inline=False)
+        embed.add_field(name='Role', value=game_player.role.name, inline=False)
+        
+        await ctx.send(embed=embed)
 
     save(ctx.guild.id)
       
@@ -188,7 +198,12 @@ async def start_game(ctx):
     await games[ctx.guild.id].progress_time()
 
     for player in games[ctx.guild.id].players:
-        await bot.get_channel(player.personal_channel_id).send(f'{bot.get_user(player.user_id).mention}\nYou are the **{player.role.name}**. The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}\nTo use your role tell the host what you will be doing.')
+        await bot.get_channel(player.personal_channel_id).send(ctx.guild.get_member(player.user_id).mention)
+        embed = discord.Embed(title='Game Info', description=f'The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}', color=discord.Color.green())
+        embed.add_field(name='Role', value=f'You are the **{player.role.name}**', inline=False)
+        embed.add_field(name='How to Play', value="This game is run primarily by the amazing hosts. Tell the hosts what you will be doing to use your role's abilities. If you have any specific questions, feel free to ask the hosts.", inline=False)
+        await bot.get_channel(player.personal_channel_id).send(embed=embed)
+
         if player.role == SalemRole.CUSTOM:
             await bot.get_channel(player.personal_channel_id).send('Your role is a custom role. The host will give the role to you.')
         
@@ -244,7 +259,8 @@ async def whisper(ctx, nick, *, message):
         await bot.get_channel(games[ctx.guild.id].game_channel_id).send(f'**{ctx.author.display_name}** is whispering to **{recipient.display_name}**')
 
         for blackmailer in games[ctx.guild.id].players_from_role(SalemRole.BLACKMAILER):
-            await bot.get_channel(blackmailer.personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}* to **{recipient.display_name}**')
+            embed = discord.Embed(title=f'{ctx.author.display_name} is whispering to {recipient.display_name}', description=message, color=discord.Color.light_grey())
+            await bot.get_channel(blackmailer.personal_channel_id).send(embed=embed)
 
         await ctx.message.add_reaction('✅')
     else:
@@ -253,20 +269,33 @@ async def whisper(ctx, nick, *, message):
 @bot.command(aliases=['player_list', 'players_list', 'plist'], brief='Lists all players in the game.')
 async def list_players(ctx):
     game = games[ctx.guild.id]
-    message = '**Players:**\n'
+
+    player_list = ''
     for player in game.players:
         if player.alive:
-            message += f'•{ctx.guild.get_member(player.user_id).display_name} ({bot.get_user(player.user_id)})\n'
-    await ctx.send(message)
+            player_list += f'{ctx.guild.get_member(player.user_id).mention}\n'
+
+    embed = discord.Embed(title='Alive Players', description=player_list, color=discord.Color.light_grey())
+    await ctx.send(embed=embed)
 
 @bot.command(aliases=['ginfo', 'game_data', 'gdata', 'data'], brief='Lists info about the game')
 @commands.has_permissions(administrator=True)
 async def game_info(ctx):
     if ctx.guild.id in games:
         game = games[ctx.guild.id]
-        await ctx.send(f'**In Progress:** {game.in_progress}\n**Game Channel ID:** {game.game_channel_id}\n**Player Role ID:** {game.player_role_id}\n**Transition Times:** {game.transition_times}\n**Current Day:** {game.day}\n**Players:**')
+        
+        embed = discord.Embed(title='Game Information', description='This game is currently in progress.' if game.in_progress else 'This game is not currently in progress.', color=discord.Color.light_grey())
+        embed.add_field(name='Game Channel', value=bot.get_channel(game.game_channel_id).mention, inline=False)
+        embed.add_field(name='Player Role', value=ctx.guild.get_role(game.player_role_id).mention, inline=False)
+        embed.add_field(name='Transition Times', value=game.transition_times, inline=False)
+        embed.add_field(name='Current Day', value=game.day, inline=False)
+
+        player_list = ''
         for player in game.players:
-            await ctx.send(f'•{ctx.guild.get_member(player.user_id).display_name} - {player.role.name}')
+            player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role.name}\n'
+        embed.add_field(name='Players', value=player_list, inline=False)
+
+        await ctx.send(embed=embed)
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
@@ -332,13 +361,15 @@ async def progress_time(ctx):
 @commands.has_permissions(administrator=True)
 async def delete_game(ctx):
     if ctx.guild.id in games:
-        for player in games[ctx.guild.id].players:
+        game = games[ctx.guild.id]
+        for player in game.players:
             try:
                 pinned_messages = await bot.get_channel(player.personal_channel_id).pins()
                 for pin in pinned_messages:
                     await pin.unpin()
 
-                await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(bot.get_guild(ctx.guild.id).get_member(player.user_id), send_messages=False)
+                await bot.get_channel(game.game_channel_id).set_permissions(ctx.guild.get_member(player.user_id), send_messages=False)
+                await ctx.guild.get_member(player.user_id).remove_roles(ctx.guild.get_role(game.player_role_id))
             except:
                 continue
 
