@@ -137,7 +137,10 @@ async def on_raw_reaction_add(payload): # TODO on reaction add, delete all other
     if payload.guild_id in games:
         game = games[payload.guild_id]
         message = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
-        official_message = await bot.get_channel(game.voting_channel_id).fetch_message(game.current_voting_message_id)
+        try:
+            official_message = await bot.get_channel(game.voting_channel_id).fetch_message(game.current_voting_message_id)
+        except:
+            return
 
         if message.content == official_message.content:
             player = game.player_from_id(payload.user_id)
