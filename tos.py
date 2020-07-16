@@ -69,10 +69,16 @@ class Player:
         self.role = role
         self.apparent_role = role
         self.votable = True
+		#Mayor info
+		self.
+		self.votePower = 1
+		self.revealed = false
         self.nomination = 0
         self.vote = 0 # 0 = abstain, 1 = inno, 2 = guilty
         self.alive = True
+		#Arsonist
         self.doused = False
+		#PlaugeBearer
         self.infected = False
         self.fused = False
         self.open_states = [None, None, None, None]       
@@ -414,6 +420,23 @@ async def list_players(ctx):
     embed = discord.Embed(title='Alive Players', description=player_list, color=discord.Color.light_grey())
     await ctx.send(embed=embed)
 
+@bot.command(brief='Confirms you as the mayor')
+async def reveal(ctx):
+     if ctx.guild.id in games:
+        game = games[ctx.guild.id]
+        for player in game:
+			if game.day == 1:
+				if player.role == "MAYOR":
+					if player.revealed == true:
+						await.ctx.send("You already revealed as mayor!")
+					else:
+						player.revealed = true
+						player.votePower = 3;
+						await self.bot.get_channel(self.game_channel_id).send("<@" + player.user_id + "> **has revealed themselves to be the Mayor!**")
+			else:
+				await self.bot.get_channel(self.game_channel_id).send("No one can use this command during the night.")
+				
+ 
 @bot.command(aliases=['ginfo', 'game_data', 'gdata', 'data'], brief='Lists info about the game')
 @commands.has_permissions(administrator=True)
 async def game_info(ctx):
