@@ -6,9 +6,12 @@ from enum import Enum
 scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scope)
 sheets_client = gspread.authorize(creds) 
-sheet = sheets_client.open('ToS Bot Data').sheet1
+with open('sheet.txt') as file:
+    sheet = sheets_client.open(file.read()).sheet1
 
-bot = commands.Bot(command_prefix='ts!')
+with open('prefix.txt') as file:
+    bot = commands.Bot(command_prefix=file.read())
+
 games = {}
 
 @tasks.loop(seconds=60)
@@ -105,7 +108,7 @@ class Game:
                 for werewolf in self.players_from_role(SalemRole.WEREWOLF):
                     if werewolf.alive:
                         await self.bot.get_channel(werewolf.personal_channel_id).send('**There is a full moon out tonight. Remember to use your role!**')
-            await self.bot.get_channel(self.game_channel_id).send(f'{self.bot.get_guild(self.guild_id).get_role(self.player_role_id).mention} Remember to use your roles tonight.')
+            await self.bot.get_channel(self.game_channel_id).send(f'{self.bot.get_guild(self.guild_id).get_role(self.player_role_id).mention} Remember to use your roles tonight and don\'t forget to have your will pinned.')
         await message.pin()
 
         save(self.guild_id)
@@ -391,7 +394,7 @@ async def whisper(ctx, nick, *, message):
 
         await ctx.message.add_reaction('✅')
     else:
-        await ctx.send(f'This whisper is not valid. To whisper, you and your recipient must be alive in the game and it must be day time but not the first day.')
+        await ctx.send('This whisper is invalid. To whisper, you and your recipient must be alive in the game and it must be day time but not the first day. You also cannot whisper to yourself.')
 
 @bot.command(aliases=['player_list', 'players_list', 'plist'], brief='Lists all players in the game.')
 async def list_players(ctx):
@@ -578,4 +581,5 @@ async def delete_game(ctx):
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
-bot.run('NzE5NTUzNDM3OTMwNjE4OTQy.Xt5IMg.wUU2ERW_9UMdqbsmWKVsO6yEHis')
+with open('token.txt', 'r') as file:
+    bot.run(file.read())
