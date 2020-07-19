@@ -24,49 +24,65 @@ async def update():
             await game.progress_time()
 
 class SalemRole(Enum):
-    INVESTIGATOR = 1
-    LOOKOUT = 2
-    PSYCHIC = 3
-    SHERIFF = 4
-    SPY = 5
-    TRACKER = 6
-    BODYGUARD = 7
-    CRUSADER = 8
-    DOCTOR = 9
-    ESCORT = 10
-    MAYOR = 11
-    MEDIUM = 12
-    TRANSPORTER = 13
-    JAILOR = 14
-    VETERAN = 15
-    VIGILANTE = 16
-    AMBUSHER = 17
-    GODFATHER = 18
-    MAFIOSO = 19
-    BLACKMAILER = 20
-    CONSIGLIERE = 21
-    CONSORT = 22
-    FRAMER = 23
-    HYPNOTIST = 24
-    JANITOR = 25
-    EXECUTIONER = 26
-    JESTER = 27
-    WITCH = 28
-    AMNESIAC = 29
-    GUARDIAN_ANGEL = 30
-    SURVIVOR = 31
-    ARSONIST = 32
-    JUGGERNAUT = 33
-    PIRATE = 34
-    SERIAL_KILLER = 35
-    WEREWOLF = 36
-    CUSTOM = 37
+    INVESTIGATOR = 0
+    LOOKOUT = 1
+    PSYCHIC = 2
+    SHERIFF = 3
+    SPY = 4
+    TRACKER = 5
+    BODYGUARD = 6
+    CRUSADER = 7
+    DOCTOR = 8
+    ESCORT = 9
+    MAYOR = 10
+    MEDIUM = 11
+    TRANSPORTER = 12
+    JAILOR = 13
+    VETERAN = 14
+    VIGILANTE = 15
+    AMBUSHER = 16
+    GODFATHER = 17
+    MAFIOSO = 18
+    BLACKMAILER = 19
+    CONSIGLIERE = 20
+    CONSORT = 21
+    FRAMER = 22
+    HYPNOTIST = 23
+    JANITOR = 24
+    EXECUTIONER = 25
+    JESTER = 26
+    WITCH = 27
+    AMNESIAC = 28
+    GUARDIAN_ANGEL = 29
+    SURVIVOR = 30
+    ARSONIST = 31
+    JUGGERNAUT = 32
+    PIRATE = 33
+    SERIAL_KILLER = 34
+    WEREWOLF = 35
+    VAMPIRE_HUNTER = 36
+    TRAPPER = 37
+    RETRIBUTIONIST = 38
+    DISGUISER = 39
+    FORGER = 40
+    PLAGUEBEARER = 41
+    PESTILENCE = 42
+    VAMPIRE = 43
+    COVEN_LEADER = 44
+    HEX_MASTER = 45
+    MEDUSA = 46
+    NECROMANCER = 47
+    POISONER = 48
+    POTION_MASTER = 49
+    CUSTOM = 50
+ROLES_WITH_TARGETS = [SalemRole.EXECUTIONER, SalemRole.GUARDIAN_ANGEL]
 
 class Player:
-    def __init__(self, user_id, personal_channel_id, role):
+    def __init__(self, user_id, personal_channel_id, role, role_display_name):
         self.user_id = user_id
         self.personal_channel_id = personal_channel_id
         self.role = role
+        self.role_display_name = role_display_name
         self.apparent_role = role
         self.votable = True
         self.nomination = 0
@@ -88,7 +104,7 @@ class Game:
         self.player_role_id = player_role_id
         self.dead_player_role_id = dead_player_role_id
         self.transition_times = transition_times
-        self.players = players
+        self.players = sorted(players, key=lambda player: player.user_id)
         self.in_progress = in_progress
         self.automatic_time = True
         self.remaining_trials = 3
@@ -236,30 +252,64 @@ async def setup_game(ctx):
         games[guild_id] = Game(bot, guild_id, False, game_channel_id, death_channel_id, voting_channel_id, player_role_id, dead_player_role_id, transition_times, [])
         save(guild_id)
 
-        await ctx.send('The game instance is set up. Use the command "delete_game" to delete this game instance and to be able to restart. Finish set up using the command "add_player" in each player\'s respective personal channel. Use the command "game_info" to review info about this instance. Use the command "start_game" to begin this instance.')
+        await ctx.send('The game instance is set up. Use the command "delete_game" to delete this game instance and to be able to restart. Finish set up using the command "add_players" in an admin channel. Use the command "game_info" to review info about this instance. Use the command "start_game" to begin this instance.')
     else:
         await ctx.send('A game instance already exists. Delete this instance with the command "delete_game" to be able to create a new one.')
 
-@bot.command(brief='Adds a player and their role to the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
+@bot.command(brief='Adds multiple players and their associated info to the the game instance.', description='List of roles (ignore the numbers): https://drive.google.com/file/d/1u-WXqlYEe6hYk8PB3lO6oqk0sPhzXeAc/view?usp=sharing')
 @commands.has_permissions(administrator=True)
-async def add_player(ctx, nick: str, role):
-    game = games[ctx.guild.id]
-    try:
-        member = member_from_string(ctx, nick)
-        if not member:
-            await ctx.send('There are multiple matches for the entered nickname. Please redo this command with their full discord name.')
+async def add_players(ctx):
+    def check_if_reply(message):
+        return message.channel == ctx.channel and message.author == ctx.message.author
+    
+    def check_if_reaction(reaction, user):
+        return user == ctx.message.author and reaction.message.channel == ctx.channel
 
-        game.players.append(Player(member.id, ctx.channel.id, SalemRole[role.upper()]))
+    game = games[ctx.guild.id]
+
+    adding_players = True
+    while adding_players:
+        await ctx.send('Enter the player name to be added (ex. Jamster):')
+        reply = await bot.wait_for('message', check=check_if_reply)
+        member = member_from_string(ctx, reply.content)
+        if not member:
+            await ctx.send('There are multiple/zero matches for the entered nickname. Please redo this command with their full discord name.')
+    
+        await ctx.send('Mention the personal channel they will use (ex. #pork):')
+        reply = await bot.wait_for('message', check=check_if_reply)
+        personal_channel = reply.channel_mentions[0]
+
+        await ctx.send('Enter their role. Valid roles are found here: https://drive.google.com/file/d/1u-WXqlYEe6hYk8PB3lO6oqk0sPhzXeAc/view?usp=sharing')
+        reply = await bot.wait_for('message', check=check_if_reply)
+        role = SalemRole[reply.content.upper()]
+
+        if role in ROLES_WITH_TARGETS:
+            await ctx.send("Enter their target's name:")
+            reply = await bot.wait_for('message', check=check_if_reply)
+            target = reply.content
+
+        await ctx.send("Enter the role's display name: ")
+        reply = await bot.wait_for('message', check=check_if_reply)
+        role_display_name = reply.content
+
+        player = Player(member.id, personal_channel.id, role, role_display_name)
+        if role in ROLES_WITH_TARGETS:
+            player.open_states[0] = target
+        game.players.append(player)
         save(ctx.guild.id)
 
         await member.add_roles(ctx.guild.get_role(game.player_role_id))
-        await ctx.message.delete()
-        await ctx.channel.set_permissions(member, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
-        await ctx.send(member.mention)
+        await personal_channel.set_permissions(member, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
+        await personal_channel.send(member.mention)
         embed = discord.Embed(title='Welcome!', description='This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. **You must have the will pinned** (it must be the most recent pinned message), or it will not go through, in the case that you die. You have been given pin perms for this channel.', color=discord.Color.dark_green())
-        await ctx.send(embed=embed)
-    except:
-        await ctx.send(f'Role or user does not exist. To use a custom role, put CUSTOM for the role parameter. See list of roles here: https://drive.google.com/file/d/1MdQJCUaKRM_jPIPN2NU3IcY0Vtp2fnI3/view?usp=sharing')
+        await personal_channel.send(embed=embed)
+
+        prompt = await ctx.send('Add another player? 👍 / 👎')
+        await prompt.add_reaction('👍')
+        await prompt.add_reaction('👎')
+        reaction = (await bot.wait_for('reaction_add', check=check_if_reaction))[0]
+        adding_players = True if reaction.emoji == '👍' else False
+    await ctx.send('Adding players is finished. If you would like to start the game, use the command "start_game". If you would like to review game info, use the command "game_info"')
 
 @bot.command(brief='Removes players from the game instance.')
 @commands.has_permissions(administrator=True)
@@ -302,7 +352,7 @@ async def remove_players(ctx):
                 embed.add_field(name='Will', value='We found no last will.', inline=False)
             else:
                 embed.add_field(name='Will', value=f'```{pins[0].content[:1018]}```', inline=False)
-            embed.add_field(name='Role', value=player.role.name, inline=False)
+            embed.add_field(name='Role', value=player.role_display_name, inline=False)
         
             await bot.get_channel(game.death_channel_id).send(embed=embed)
     
@@ -321,7 +371,7 @@ async def begin_voting(ctx):
     embed = discord.Embed(title='Voting', description=f'There are {game.remaining_trials} possible trials remaining today.\nReact to vote up a player.', color=discord.Color.dark_red())
     player_list = ''
     i = 0
-    for player in game.get_votable_players():
+    for player in sorted(game.get_votable_players(), key=lambda player: player.user_id):
             player_list += ':regional_indicator_' + chr(i + 97) + ': ' + ctx.guild.get_member(player.user_id).display_name + '\n'
             i += 1
     embed.add_field(name='Players', value=player_list, inline=False)
@@ -341,18 +391,16 @@ async def start_game(ctx):
     for player in games[ctx.guild.id].players:
         await bot.get_channel(player.personal_channel_id).send(ctx.guild.get_member(player.user_id).mention)
         embed = discord.Embed(title='Game Info', description=f'The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}', color=discord.Color.green())
-        embed.add_field(name='Role', value=f'You are the **{player.role.name}**', inline=False)
+        embed.add_field(name='Role', value=f'You are the **{player.role_display_name}**', inline=False)
+        if player.role in ROLES_WITH_TARGETS:
+            embed.add_field(name='Target', value=f'Your target is **{player.open_states[0]}**', inline=False)
         embed.add_field(name='How to Play', value="This game is run primarily by the amazing hosts. Tell the hosts what you will be doing to use your role's abilities. If you have any specific questions, feel free to ask the hosts.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}whisper <nick> <message>', value="This command, used in your personal channel, is used for whispering. It will send your message to the recipient's personal channel and announce who you whispered to in the main game chat. You and your recipient must be alive and it must be day but not the first day. If the recipient's name has a space in it, surround the name in quotes.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}time', value="This command gives the current time in UTC.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}list_players', value="This command gives a list of currently alive players in the game.", inline=False)
         await bot.get_channel(player.personal_channel_id).send(embed=embed)
-
-        if player.role == SalemRole.CUSTOM:
-            await bot.get_channel(player.personal_channel_id).send('Your role is a custom role. The host will give the role to you.')
         
         await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(bot.get_guild(ctx.guild.id).get_member(player.user_id), read_messages=True, read_message_history=True)
-    await ctx.message.delete()
 
 @bot.command(aliases=['utc'], brief='Gives the current time in UTC')
 async def time(ctx):
@@ -378,7 +426,7 @@ async def set_role(ctx, nick, role):
     player = game.player_from_id(member.id)
     player.role = SalemRole[role]
     save(ctx.guild.id)
-    await bot.get_channel(player.personal_channel_id).send(f'{member.mention} Your role has been changed to {player.role.name}')
+    await bot.get_channel(player.personal_channel_id).send(f'{member.mention} Your role has been changed to {player.role_display_name}')
 
     await ctx.message.add_reaction('✅')
 
@@ -391,6 +439,10 @@ async def whisper(ctx, nick, *, message):
         await ctx.send('There are no/multiple matches for the entered nickname. Please redo this command with their full discord name or id.')
 
     if ctx.guild.id in games and games[ctx.guild.id].day == int(games[ctx.guild.id].day) and recipient != ctx.author and games[ctx.guild.id].day >= 2 and games[ctx.guild.id].player_from_id(ctx.author.id).alive and games[ctx.guild.id].player_from_id(recipient.id).alive:
+        game = games[ctx.guild.id]
+        if (game.player_from_id(ctx.author.id).role == SalemRole.MAYOR and game.player_from_id(ctx.author.id).open_states[0] == "True") or (game.player_from_id(recipient.id).role == SalemRole.MAYOR and game.player_from_id(recipient.id).open_states[0] == "True"):
+            return
+
         await bot.get_channel(games[ctx.guild.id].player_from_id(recipient.id).personal_channel_id).send(f'**{ctx.author.display_name}** whispers *{message}*')
         await bot.get_channel(games[ctx.guild.id].game_channel_id).send(f'**{ctx.author.display_name}** is whispering to **{recipient.display_name}**')
 
@@ -407,9 +459,12 @@ async def list_players(ctx):
     game = games[ctx.guild.id]
 
     player_list = ''
-    for player in game.players:
+    for player in sorted(game.players, key=lambda player: player.user_id):
         if player.alive:
-            player_list += f'{ctx.guild.get_member(player.user_id).mention}\n'
+            try:
+                player_list += f'{ctx.guild.get_member(player.user_id).mention}\n'
+            except:
+                pass
 
     embed = discord.Embed(title='Alive Players', description=player_list, color=discord.Color.light_grey())
     await ctx.send(embed=embed)
@@ -428,11 +483,14 @@ async def game_info(ctx):
 
         alive_player_list = 'Alive:\n'
         dead_player_list = 'Dead:\n'
-        for player in game.players:
+        for player in sorted(game.players, key=lambda player: player.user_id):
             if player.alive:
-                alive_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role.name}\n'
+                try:
+                    alive_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role_display_name}\n'
+                except:
+                    pass
             else:
-                dead_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role.name}\n'
+                dead_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role_display_name}\n'
         embed.add_field(name='Alive Players', value=alive_player_list, inline=False)
         embed.add_field(name='Dead Players', value=dead_player_list, inline=False)
 
@@ -449,6 +507,7 @@ def save(guild_id):
         data.append(str(player.user_id))
         data.append(str(player.personal_channel_id))
         data.append(str(player.role.name))
+        data.append(str(player.role_display_name))
         data.append(str(player.apparent_role.name))
         data.append(str(player.votable))
         data.append(str(player.nomination))
@@ -489,21 +548,22 @@ def load(guild_id):
         current_voting_message_id = int(data[14])
 
         players = []
-        for i in range(15, len(data) - 1, 15):
+        for i in range(15, len(data) - 1, 16):
             user_id = int(data[i])
             personal_channel_id = int(data[i + 1])
             role_name = data[i + 2]
-            apparent_role_name = data[i + 3]
-            votable = bool(data[i + 4])
-            nomination = int(data[i + 5])
-            vote = int(data[i + 6])
-            alive = bool(data[i + 7])
-            doused = bool(data[i + 8])
-            infected = bool(data[i + 9])
-            fused = bool(data[i + 10])
-            open_states = [data[i + 11], data[i + 12], data[i + 13], data[i + 14]]
+            role_display_name = data[i + 3]
+            apparent_role_name = data[i + 4]
+            votable = bool(data[i + 5])
+            nomination = int(data[i + 6])
+            vote = int(data[i + 7])
+            alive = bool(data[i + 8])
+            doused = bool(data[i + 9])
+            infected = bool(data[i + 10])
+            fused = bool(data[i + 11])
+            open_states = [data[i + 12], data[i + 13], data[i + 14], data[i + 15]]
 
-            player = Player(user_id, personal_channel_id, SalemRole[role_name])
+            player = Player(user_id, personal_channel_id, SalemRole[role_name], role_display_name)
             player.apparent_role = SalemRole[apparent_role_name]
             player.votable = votable
             player.nomination = nomination
@@ -586,6 +646,17 @@ async def delete_game(ctx):
         await ctx.message.add_reaction('✅')
     else:
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
+
+@bot.command(brief='Reveals as mayor')
+@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.MAYOR and games[ctx.guild.id].player_from_id(ctx.author.id).open_states[0] != "True")
+async def reveal(ctx):
+    game = games[ctx.guild.id]
+    player = game.player_from_id(ctx.author.id)
+        
+    player.open_states[0] = "True"
+    save(ctx.guild.id)
+    reveal_message = await bot.get_channel(game.game_channel_id).send(f'**{ctx.author.display_name}** has revealed themselves as **MAYOR**')
+    await reveal_message.pin()
 
 with open('token.txt', 'r') as file:
     bot.run(file.read())
