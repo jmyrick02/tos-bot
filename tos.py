@@ -20,7 +20,7 @@ async def update():
 
     for guild_id in games:
         game = games[guild_id]
-        if (game.automatic_time and game.in_progress and (time.hour == game.transition_times[0][0] and time.minute == game.transition_times[0][1]) or (time.hour == game.transition_times[1][0] and time.minute == game.transition_times[1][1])):
+        if (game.automatic_time and game.in_progress and ((time.hour == game.transition_times[0][0] and time.minute == game.transition_times[0][1]) or (time.hour == game.transition_times[1][0] and time.minute == game.transition_times[1][1]))):
             await game.progress_time()
 
 class SalemRole(Enum):
@@ -91,15 +91,18 @@ class Player:
         self.doused = False
         self.infected = False
         self.fused = False
+        self.jailed = False
         self.open_states = [None, None, None, None]       
 
 class Game:
-    def __init__(self, bot, guild_id, in_progress, game_channel_id, death_channel_id, voting_channel_id, player_role_id, dead_player_role_id, transition_times, players):
+    def __init__(self, bot, guild_id, in_progress, game_channel_id, death_channel_id, voting_channel_id, jail_channel_id, player_role_id, dead_player_role_id, transition_times, players):
         self.day = .5  # 1 = day 1, 1.5 = night 1 etc.
         self.bot = bot
         self.game_channel_id = game_channel_id
         self.death_channel_id = death_channel_id
         self.voting_channel_id = voting_channel_id
+        self.jail_channel_id = jail_channel_id
+        self.evil_channel_ids = []
         self.guild_id = guild_id
         self.player_role_id = player_role_id
         self.dead_player_role_id = dead_player_role_id
@@ -112,10 +115,28 @@ class Game:
 
     async def progress_time(self):
         self.day += 0.5
-        if int(self.day) == self.day:  # day time
+        if int(self.day) == self.day:  # day time # TODO unjail jailed players: delete all previous messages in jailed channel and remove jailed player from jailed channel, change jailor's jailed target to 0, etc.
             message = await self.bot.get_channel(self.game_channel_id).send(f'**DAY {int(self.day)}**')
             await self.bot.get_channel(self.game_channel_id).set_permissions(self.bot.get_guild(self.guild_id).get_role(self.player_role_id), send_messages=True)
             self.remaining_trials = 3
+
+            for jailor in self.players_from_role(SalemRole.JAILOR):
+                if jailor.open_states[0] != 'None':
+                    jailed_member = self.bot.get_guild(self.guild_id).get_member(int(jailor.open_states[0]))
+                    jailed_player = self.player_from_id(int(jailor.open_states[0]))
+                    jailed_player.jailed = False
+                    jailor.open_states[0] = 'None'
+                    save(self.guild_id)
+                
+                    jailed_channel = bot.get_channel(self.jail_channel_id)
+                    await jailed_channel.set_permissions(jailed_member, read_messages=False, send_messages=False, manage_messages=False, read_message_history=False)
+
+                    while True:
+                        messages = await jailed_channel.history(limit=100).flatten()
+                        if len(messages) == 0:
+                            break
+
+                        await jailed_channel.delete_messages(messages)
         else:
             await self.bot.get_channel(self.game_channel_id).set_permissions(self.bot.get_guild(self.guild_id).get_role(self.player_role_id), send_messages=False)
             message = await self.bot.get_channel(self.game_channel_id).send(f'**NIGHT {int(self.day)}**')
@@ -125,6 +146,17 @@ class Game:
                     if werewolf.alive:
                         await self.bot.get_channel(werewolf.personal_channel_id).send('**There is a full moon out tonight. Remember to use your role!**')
             await self.bot.get_channel(self.game_channel_id).send(f'{self.bot.get_guild(self.guild_id).get_role(self.player_role_id).mention} Remember to use your roles tonight and don\'t forget to have your will pinned.')
+
+            for jailor in self.players_from_role(SalemRole.JAILOR):
+                if jailor.open_states[0] != 'None':
+                    jailed_member = self.bot.get_guild(self.guild_id).get_member(int(jailor.open_states[0]))
+                    jailed_player = self.player_from_id(int(jailor.open_states[0]))
+                    jailed_player.jailed = True
+                    save(self.guild_id)
+                
+                    jailed_channel = bot.get_channel(self.jail_channel_id)
+                    await jailed_channel.set_permissions(jailed_member, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
+                    await jailed_channel.send(jailed_member.mention + "**You have been jailed**\nAny messages sent here will be relayed to the jailor. Messages from the jailor will be relayed to you through this bot to preserve the jailor's secrecy of identity.")
         await message.pin()
 
         save(self.guild_id)
@@ -147,6 +179,19 @@ async def on_ready():
     update.start()
     for guild in bot.guilds:
         load(guild.id)
+
+@bot.event
+async def on_message(message):
+    if message.guild.id in games:
+        game = games[message.guild.id]
+
+        if message.channel.id == game.jail_channel_id and message.author.id != bot.user.id:
+            for jailor in game.players_from_role(SalemRole.JAILOR):
+                personal_channel = bot.get_channel(jailor.personal_channel_id)
+
+                await personal_channel.send('**Your prisoner says** ' + message.content)
+    
+    await bot.process_commands(message)
 
 @bot.event
 async def on_raw_reaction_add(payload): # TODO on reaction add, delete all other reactions on the message by that user
@@ -223,6 +268,14 @@ async def setup_game(ctx):
         reply = await bot.wait_for('message', check=check_if_reply)
         voting_channel_id = reply.channel_mentions[0].id
 
+        await ctx.send('Mention the jail channel (ex. #jail):')
+        reply = await bot.wait_for('message', check=check_if_reply)
+        jail_channel_id = reply.channel_mentions[0].id
+
+        """await ctx.send('Mention the mafia channel(s) (ex. #mafia *or* #mafia #coven):')
+        reply = await bot.wait_for('message', check=check_if_reply)
+        evil_channel_ids = map(lambda channel: channel.id, reply.channel_mentions)"""
+
         await ctx.send('Mention the player role for use while alive (ex. @Player):')
         reply = await bot.wait_for('message', check=check_if_reply)
         player_role_id = reply.role_mentions[0].id
@@ -249,7 +302,7 @@ async def setup_game(ctx):
 
         transition_times = [[hour1, minute1], [hour2, minute2]]
 
-        games[guild_id] = Game(bot, guild_id, False, game_channel_id, death_channel_id, voting_channel_id, player_role_id, dead_player_role_id, transition_times, [])
+        games[guild_id] = Game(bot, guild_id, False, game_channel_id, death_channel_id, voting_channel_id, jail_channel_id, player_role_id, dead_player_role_id, transition_times, [])
         save(guild_id)
 
         await ctx.send('The game instance is set up. Use the command "delete_game" to delete this game instance and to be able to restart. Finish set up using the command "add_players" in an admin channel. Use the command "game_info" to review info about this instance. Use the command "start_game" to begin this instance.')
@@ -286,7 +339,9 @@ async def add_players(ctx):
         if role in ROLES_WITH_TARGETS:
             await ctx.send("Enter their target's name:")
             reply = await bot.wait_for('message', check=check_if_reply)
-            target = reply.content
+            member2 = member_from_string(ctx, reply.content)
+            if not member2:
+                await ctx.send('There are multiple/zero matches for the entered nickname. Please redo this command with their full discord name.')
 
         await ctx.send("Enter the role's display name: ")
         reply = await bot.wait_for('message', check=check_if_reply)
@@ -294,7 +349,7 @@ async def add_players(ctx):
 
         player = Player(member.id, personal_channel.id, role, role_display_name)
         if role in ROLES_WITH_TARGETS:
-            player.open_states[0] = target
+            player.open_states[0] = str(member2.id)
         game.players.append(player)
         save(ctx.guild.id)
 
@@ -388,19 +443,19 @@ async def start_game(ctx):
     await bot.get_channel(games[ctx.guild.id].game_channel_id).send('**-------------------------------------------------------------------------------------------------------------------------**')
     await games[ctx.guild.id].progress_time()
 
+    await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(ctx.guild.get_role(games[ctx.guild.id].player_role_id), read_messages=True, read_message_history=True)
+
     for player in games[ctx.guild.id].players:
         await bot.get_channel(player.personal_channel_id).send(ctx.guild.get_member(player.user_id).mention)
         embed = discord.Embed(title='Game Info', description=f'The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}', color=discord.Color.green())
         embed.add_field(name='Role', value=f'You are the **{player.role_display_name}**', inline=False)
         if player.role in ROLES_WITH_TARGETS:
-            embed.add_field(name='Target', value=f'Your target is **{player.open_states[0]}**', inline=False)
+            embed.add_field(name='Target', value=f'Your target is **{ctx.guild.get_member(int(player.open_states[0])).display_name}**', inline=False)
         embed.add_field(name='How to Play', value="This game is run primarily by the amazing hosts. Tell the hosts what you will be doing to use your role's abilities. If you have any specific questions, feel free to ask the hosts.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}whisper <nick> <message>', value="This command, used in your personal channel, is used for whispering. It will send your message to the recipient's personal channel and announce who you whispered to in the main game chat. You and your recipient must be alive and it must be day but not the first day. If the recipient's name has a space in it, surround the name in quotes.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}time', value="This command gives the current time in UTC.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}list_players', value="This command gives a list of currently alive players in the game.", inline=False)
         await bot.get_channel(player.personal_channel_id).send(embed=embed)
-        
-        await bot.get_channel(games[ctx.guild.id].game_channel_id).set_permissions(bot.get_guild(ctx.guild.id).get_member(player.user_id), read_messages=True, read_message_history=True)
 
 @bot.command(aliases=['utc'], brief='Gives the current time in UTC')
 async def time(ctx):
@@ -416,7 +471,10 @@ async def set_transition_times(ctx, hour1, minute1, hour2, minute2):
 
 @bot.command(brief='Sets a players role to a new role')
 @commands.has_permissions(administrator=True)
-async def set_role(ctx, nick, role):
+async def set_role(ctx, nick, role, role_display_name):
+    def check_if_reply(message):
+        return message.channel == ctx.channel and message.author == ctx.message.author
+    
     game = games[ctx.guild.id]
 
     member = member_from_string(ctx, nick)
@@ -425,8 +483,21 @@ async def set_role(ctx, nick, role):
 
     player = game.player_from_id(member.id)
     player.role = SalemRole[role]
-    save(ctx.guild.id)
+    player.role_display_name = role_display_name
+
     await bot.get_channel(player.personal_channel_id).send(f'{member.mention} Your role has been changed to {player.role_display_name}')
+
+    if SalemRole[role] in ROLES_WITH_TARGETS:
+        await ctx.send("Enter their target's name:")
+        reply = await bot.wait_for('message', check=check_if_reply)
+        member2 = member_from_string(ctx, reply.content)
+        if not member2:
+            await ctx.send('There are multiple/zero matches for the entered nickname. Please redo this command with their full discord name.')
+        
+        player.open_states[0] = str(member2.id)
+        await bot.get_channel(player.personal_channel_id).send('Your target is ' + member2.display_name)
+
+    save(ctx.guild.id)
 
     await ctx.message.add_reaction('✅')
 
@@ -500,8 +571,12 @@ async def game_info(ctx):
 
 def save(guild_id):
     game = games[guild_id]
-    data = [str(guild_id), str(game.in_progress), str(game.game_channel_id), str(game.death_channel_id), str(game.voting_channel_id), str(game.player_role_id), str(game.dead_player_role_id), str(game.transition_times[0][0]), str(
-        game.transition_times[0][1]), str(game.transition_times[1][0]), str(game.transition_times[1][1]), str(game.day), str(game.automatic_time), str(game.remaining_trials), str(game.current_voting_message_id)]
+
+    evil_channel_ids_string = ''
+    for evil_channel_id in game.evil_channel_ids:
+        evil_channel_ids_string += str(evil_channel_id) + ' '
+
+    data = [str(guild_id), str(game.in_progress), str(game.game_channel_id), str(game.death_channel_id), str(game.voting_channel_id), str(game.jail_channel_id), evil_channel_ids_string, str(game.player_role_id), str(game.dead_player_role_id), str(game.transition_times[0][0]), str(game.transition_times[0][1]), str(game.transition_times[1][0]), str(game.transition_times[1][1]), str(game.day), str(game.automatic_time), str(game.remaining_trials), str(game.current_voting_message_id)]
 
     for player in game.players:
         data.append(str(player.user_id))
@@ -516,6 +591,7 @@ def save(guild_id):
         data.append(str(player.doused))
         data.append(str(player.infected))
         data.append(str(player.fused))
+        data.append(str(player.jailed))
         for state in player.open_states:
             data.append(str(state))
 
@@ -539,16 +615,18 @@ def load(guild_id):
         game_channel_id = int(data[2])
         death_channel_id = int(data[3])
         voting_channel_id = int(data[4])
-        player_role_id = int(data[5])
-        dead_player_role_id = int(data[6])
-        transition_times = [[int(data[7]), int(data[8])], [int(data[9]), int(data[10])]]
-        day = float(data[11])
-        automatic_time = bool(data[12])
-        remaining_trials = int(data[13])
-        current_voting_message_id = int(data[14])
+        jail_channel_id = int(data[5])
+        # evil_channel_ids_string = data[6]
+        player_role_id = int(data[7])
+        dead_player_role_id = int(data[8])
+        transition_times = [[int(data[9]), int(data[10])], [int(data[11]), int(data[12])]]
+        day = float(data[13])
+        automatic_time = bool(data[14])
+        remaining_trials = int(data[15])
+        current_voting_message_id = int(data[16])
 
         players = []
-        for i in range(15, len(data) - 1, 16):
+        for i in range(17, len(data) - 1, 17):
             user_id = int(data[i])
             personal_channel_id = int(data[i + 1])
             role_name = data[i + 2]
@@ -561,7 +639,8 @@ def load(guild_id):
             doused = bool(data[i + 9])
             infected = bool(data[i + 10])
             fused = bool(data[i + 11])
-            open_states = [data[i + 12], data[i + 13], data[i + 14], data[i + 15]]
+            jailed = bool(data[i + 12])
+            open_states = [data[i + 13], data[i + 14], data[i + 15], data[i + 16]]
 
             player = Player(user_id, personal_channel_id, SalemRole[role_name], role_display_name)
             player.apparent_role = SalemRole[apparent_role_name]
@@ -572,10 +651,11 @@ def load(guild_id):
             player.doused = doused
             player.infected = infected
             player.fused = fused
+            player.jailed = jailed
             player.open_states = open_states
             players.append(player)
 
-        games[guild_id] = Game(bot, guild_id, in_progress, game_channel_id, death_channel_id, voting_channel_id, player_role_id, dead_player_role_id, transition_times, players)
+        games[guild_id] = Game(bot, guild_id, in_progress, game_channel_id, death_channel_id, voting_channel_id, jail_channel_id, player_role_id, dead_player_role_id, transition_times, players)
         games[guild_id].day = day
         games[guild_id].automatic_time = automatic_time
         games[guild_id].remaining_trials = remaining_trials
@@ -657,6 +737,27 @@ async def reveal(ctx):
     save(ctx.guild.id)
     reveal_message = await bot.get_channel(game.game_channel_id).send(f'**{ctx.author.display_name}** has revealed themselves as **MAYOR**')
     await reveal_message.pin()
+
+@bot.command(brief='Jails a player')
+@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR)
+async def jail(ctx, name):
+    game = games[ctx.guild.id]
+    player = game.player_from_id(ctx.author.id)
+    
+    member = member_from_string(ctx, name)
+    if not member:
+        return
+    
+    player.open_states[0] = str(member.id)
+    save(ctx.guild.id)
+    await ctx.message.add_reaction('✅')
+
+@bot.command(brief='Sends a message to the jail', aliases=['jail_send', 'sjail', 'jsend'])
+@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR)
+async def send_jail(ctx, *, message):
+    game = games[ctx.guild.id]
+
+    await bot.get_channel(game.jail_channel_id).send(f'**{game.player_from_id(ctx.author.id).role_display_name}:** {message}')
 
 with open('token.txt', 'r') as file:
     bot.run(file.read())
