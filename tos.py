@@ -115,7 +115,7 @@ class Game:
 
     async def progress_time(self):
         self.day += 0.5
-        if int(self.day) == self.day:  # day time # TODO unjail jailed players: delete all previous messages in jailed channel and remove jailed player from jailed channel, change jailor's jailed target to 0, etc.
+        if int(self.day) == self.day:  # day time
             message = await self.bot.get_channel(self.game_channel_id).send(f'**DAY {int(self.day)}**')
             await self.bot.get_channel(self.game_channel_id).set_permissions(self.bot.get_guild(self.guild_id).get_role(self.player_role_id), send_messages=True)
             self.remaining_trials = 3
@@ -300,7 +300,7 @@ async def setup_game(ctx):
         reply = await bot.wait_for('message', check=check_if_reply)
         minute2 = reply.content
 
-        transition_times = [[hour1, minute1], [hour2, minute2]]
+        transition_times = [(hour1, minute1), (hour2, minute2)]
 
         games[guild_id] = Game(bot, guild_id, False, game_channel_id, death_channel_id, voting_channel_id, jail_channel_id, player_role_id, dead_player_role_id, transition_times, [])
         save(guild_id)
@@ -357,6 +357,7 @@ async def add_players(ctx):
         await personal_channel.set_permissions(member, read_messages=True, send_messages=True, manage_messages=True, read_message_history=True)
         await personal_channel.send(member.mention)
         embed = discord.Embed(title='Welcome!', description='This is your own private channel. This is where you are told what your role is, and where you tell the host how you use it as well. On top of that, this is where you store your will. **You must have the will pinned** (it must be the most recent pinned message), or it will not go through, in the case that you die. You have been given pin perms for this channel.', color=discord.Color.dark_green())
+        embed.add_field(name='Game Schedule', value=f'The game will transition between day and night at **{time_tuple_to_string(game.transition_times[0])}** and **{time_tuple_to_string(game.transition_times[1])}**')
         await personal_channel.send(embed=embed)
 
         prompt = await ctx.send('Add another player? 👍 / 👎')
@@ -450,11 +451,19 @@ async def start_game(ctx):
         embed = discord.Embed(title='Game Info', description=f'The game has begun in {bot.get_channel(games[ctx.guild.id].game_channel_id).mention}', color=discord.Color.green())
         embed.add_field(name='Role', value=f'You are the **{player.role_display_name}**', inline=False)
         if player.role in ROLES_WITH_TARGETS:
-            embed.add_field(name='Target', value=f'Your target is **{ctx.guild.get_member(int(player.open_states[0])).display_name}**', inline=False)
+            try:
+                embed.add_field(name='Target', value=f'Your target is **{ctx.guild.get_member(int(player.open_states[0])).display_name}**', inline=False)
+            except:
+                pass
         embed.add_field(name='How to Play', value="This game is run primarily by the amazing hosts. Tell the hosts what you will be doing to use your role's abilities. If you have any specific questions, feel free to ask the hosts.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}whisper <nick> <message>', value="This command, used in your personal channel, is used for whispering. It will send your message to the recipient's personal channel and announce who you whispered to in the main game chat. You and your recipient must be alive and it must be day but not the first day. If the recipient's name has a space in it, surround the name in quotes.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}time', value="This command gives the current time in UTC.", inline=False)
         embed.add_field(name=f'{bot.command_prefix}list_players', value="This command gives a list of currently alive players in the game.", inline=False)
+        if player.role == SalemRole.MAYOR:
+            embed.add_field(name=f'{bot.command_prefix}reveal', value="This command reveals to town that you are mayor but prevents whispering to or from you. You also get 3 votes when revealed.", inline=False)
+        if player.role == SalemRole.JAILOR:
+            embed.add_field(name=f'{bot.command_prefix}jail <player>', value="This command sets a player to be jailed come night. Must be used during the day.", inline=False)
+            embed.add_field(name=f'{bot.command_prefix}send_jail (message)', value="This command sends a message to the jail to preserve your anonymity.", inline=False)
         await bot.get_channel(player.personal_channel_id).send(embed=embed)
 
 @bot.command(aliases=['utc'], brief='Gives the current time in UTC')
@@ -464,8 +473,7 @@ async def time(ctx):
 @bot.command(brief='Changes the transition times for the game instance')
 @commands.has_permissions(administrator=True)
 async def set_transition_times(ctx, hour1, minute1, hour2, minute2):
-    games[ctx.guild.id].transition_times = [
-        [int(hour1), int(minute1)], [int(hour2), int(minute2)]]
+    games[ctx.guild.id].transition_times = [(int(hour1), int(minute1)), (int(hour2), int(minute2))]
     save(ctx.guild.id)
     await ctx.message.add_reaction('✅')
 
@@ -547,21 +555,29 @@ async def game_info(ctx):
         game = games[ctx.guild.id]
         
         embed = discord.Embed(title='Game Information', description='This game is currently in progress.' if game.in_progress else 'This game is not currently in progress.', color=discord.Color.light_grey())
-        embed.add_field(name='Game Channel', value=bot.get_channel(game.game_channel_id).mention, inline=False)
-        embed.add_field(name='Player Role', value=ctx.guild.get_role(game.player_role_id).mention, inline=False)
-        embed.add_field(name='Transition Times', value=game.transition_times, inline=False)
-        embed.add_field(name='Current Day', value=game.day, inline=False)
-
+        embed.add_field(name='Current Day', value=game.day)
+        embed.add_field(name='Automatic Time Transition', value=str(game.automatic_time))
+        embed.add_field(name='Transition Times', value=f'{time_tuple_to_string(game.transition_times[0])} and {time_tuple_to_string(game.transition_times[1])}')
+        embed.add_field(name='Alive Player Role', value=ctx.guild.get_role(game.player_role_id).mention)
+        embed.add_field(name='Dead Player Role', value=ctx.guild.get_role(game.dead_player_role_id).mention)
+        embed.add_field(name='Game Channel', value=bot.get_channel(game.game_channel_id).mention)
+        embed.add_field(name='Dead Channel', value=bot.get_channel(game.death_channel_id).mention)
+        embed.add_field(name='Voting Channel', value=bot.get_channel(game.voting_channel_id).mention)
+        embed.add_field(name='Game Channel', value=bot.get_channel(game.jail_channel_id).mention)
+        
         alive_player_list = 'Alive:\n'
         dead_player_list = 'Dead:\n'
         for player in sorted(game.players, key=lambda player: player.user_id):
-            if player.alive:
-                try:
-                    alive_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role_display_name}\n'
-                except:
-                    pass
-            else:
-                dead_player_list += f'{ctx.guild.get_member(player.user_id).mention} - {player.role_display_name}\n'
+            try:
+                target_string = f'<{ctx.guild.get_member(int(player.open_states[0])).display_name}>' if player.role in ROLES_WITH_TARGETS else ''
+                string = f'{ctx.guild.get_member(player.user_id).mention} - {player.role_display_name} ({player.role.name}) {target_string} {bot.get_channel(player.personal_channel_id).mention}\n'
+
+                if player.alive:
+                    alive_player_list += string
+                else:
+                    dead_player_list += string
+            except:
+                continue
         embed.add_field(name='Alive Players', value=alive_player_list, inline=False)
         embed.add_field(name='Dead Players', value=dead_player_list, inline=False)
 
@@ -619,7 +635,7 @@ def load(guild_id):
         # evil_channel_ids_string = data[6]
         player_role_id = int(data[7])
         dead_player_role_id = int(data[8])
-        transition_times = [[int(data[9]), int(data[10])], [int(data[11]), int(data[12])]]
+        transition_times = [(int(data[9]), int(data[10])), (int(data[11]), int(data[12]))]
         day = float(data[13])
         automatic_time = bool(data[14])
         remaining_trials = int(data[15])
@@ -663,6 +679,15 @@ def load(guild_id):
         print('Loaded game of guild_id:', guild_id)
     except:
         print(f'Data for {guild_id} does not exist. Game instance not created.')
+
+def time_tuple_to_string(time_tuple):
+    def zeroify(num):
+        if len(str(num)) == 1:
+            return f'0{str(num)}'
+        else:
+            return str(num)
+
+    return f'{zeroify(time_tuple[0])}:{zeroify(time_tuple[1])} UTC'
 
 def member_from_string(ctx, string):
     members = [member for member in ctx.guild.members if string == member.display_name or string == str(member.id) or string == member.name or string == str(member)]
@@ -728,7 +753,7 @@ async def delete_game(ctx):
         await ctx.send('There is no game instance. Use the command "setup_game" to create one.')
 
 @bot.command(brief='Reveals as mayor')
-@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.MAYOR and games[ctx.guild.id].player_from_id(ctx.author.id).open_states[0] != "True")
+@commands.check(lambda ctx: ctx.guild.id in games and games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.MAYOR and games[ctx.guild.id].player_from_id(ctx.author.id).open_states[0] != "True")
 async def reveal(ctx):
     game = games[ctx.guild.id]
     player = game.player_from_id(ctx.author.id)
@@ -739,7 +764,7 @@ async def reveal(ctx):
     await reveal_message.pin()
 
 @bot.command(brief='Jails a player')
-@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR)
+@commands.check(lambda ctx: ctx.guild.id in games and games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR and games[ctx.guild.id].day == int(games[ctx.guild.id].day))
 async def jail(ctx, name):
     game = games[ctx.guild.id]
     player = game.player_from_id(ctx.author.id)
@@ -753,11 +778,12 @@ async def jail(ctx, name):
     await ctx.message.add_reaction('✅')
 
 @bot.command(brief='Sends a message to the jail', aliases=['jail_send', 'sjail', 'jsend'])
-@commands.check(lambda ctx: games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR)
+@commands.check(lambda ctx: ctx.guild.id in games and games[ctx.guild.id].in_progress and games[ctx.guild.id].player_from_id(ctx.author.id).role == SalemRole.JAILOR)
 async def send_jail(ctx, *, message):
     game = games[ctx.guild.id]
 
     await bot.get_channel(game.jail_channel_id).send(f'**{game.player_from_id(ctx.author.id).role_display_name}:** {message}')
+    await ctx.message.add_reaction('✅')
 
 with open('token.txt', 'r') as file:
     bot.run(file.read())
