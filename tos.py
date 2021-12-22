@@ -1,4 +1,5 @@
 import discord, datetime, asyncio, gspread
+from discord import channel
 from discord.ext import tasks, commands
 from oauth2client.service_account import ServiceAccountCredentials
 from enum import Enum
@@ -10,7 +11,9 @@ with open('sheet.txt') as file:
     sheet = sheets_client.open(file.read()).sheet1
 
 with open('prefix.txt') as file:
-    bot = commands.Bot(command_prefix=file.read())
+    intents = discord.Intents.default()
+    intents.members = True
+    bot = commands.Bot(command_prefix=file.read(), intents=intents)
 
 games = {}
 
@@ -320,6 +323,10 @@ async def add_players(ctx):
 
     game = games[ctx.guild.id]
 
+    await ctx.send('Mention the template channel for all players\' personal channels')
+    reply = await bot.wait_for('message', check=check_if_reply)
+    template_channel = reply.channel_mentions[0]
+
     adding_players = True
     while adding_players:
         await ctx.send('Enter the player name to be added (ex. Jamster):')
@@ -327,10 +334,8 @@ async def add_players(ctx):
         member = member_from_string(ctx, reply.content)
         if not member:
             await ctx.send('There are multiple/zero matches for the entered nickname. Please redo this command with their full discord name.')
-    
-        await ctx.send('Mention the personal channel they will use (ex. #pork):')
-        reply = await bot.wait_for('message', check=check_if_reply)
-        personal_channel = reply.channel_mentions[0]
+
+        personal_channel = await template_channel.clone(name=member.name)
 
         await ctx.send('Enter their role. Valid roles are found here: https://drive.google.com/file/d/1u-WXqlYEe6hYk8PB3lO6oqk0sPhzXeAc/view?usp=sharing')
         reply = await bot.wait_for('message', check=check_if_reply)
